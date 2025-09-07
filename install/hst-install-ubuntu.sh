@@ -6,7 +6,7 @@
 # https://www.hestiacp.com/
 #
 # Currently Supported Versions:
-# Ubuntu 20.04, 22.04, 24.04 LTS
+# Ubuntu 22.04, 24.04 LTS
 #
 # ======================================================== #
 
@@ -31,9 +31,9 @@ HESTIA_COMMON_DIR="$HESTIA/install/common"
 VERBOSE='no'
 
 # Define software versions
-HESTIA_INSTALL_VER='1.9.0~alpha'
+HESTIA_INSTALL_VER='1.10.0~alpha'
 # Supported PHP versions
-multiphp_v=("5.6" "7.0" "7.1" "7.2" "7.3" "7.4" "8.0" "8.1" "8.2" "8.3")
+multiphp_v=("5.6" "7.0" "7.1" "7.2" "7.3" "7.4" "8.0" "8.1" "8.2" "8.3" "8.4")
 # One of the following PHP versions is required for Roundcube / phpmyadmin
 multiphp_required=("7.3" "7.4" "8.0" "8.1" "8.2" "8.3")
 # Default PHP version if none supplied
@@ -44,7 +44,7 @@ mariadb_v="11.4"
 node_v="20"
 
 # Defining software pack for all distros
-software="acl apache2 apache2.2-common apache2-suexec-custom apache2-utils apparmor-utils awstats bc bind9 bsdmainutils bsdutils
+software="acl apache2 apache2.2-common apache2-suexec-custom apache2-utils apparmor-utils at awstats bc bind9 bsdmainutils bsdutils
   clamav-daemon cron curl dnsutils dovecot-imapd dovecot-managesieved dovecot-pop3d dovecot-sieve e2fslibs e2fsprogs
   exim4 exim4-daemon-heavy expect fail2ban flex ftp git hestia=${HESTIA_INSTALL_VER} hestia-nginx hestia-php hestia-web-terminal
   idn2 imagemagick ipset jq libapache2-mod-fcgid libapache2-mod-php$fpm_v libapache2-mod-rpaf libonig5 libzip4 lsb-release
@@ -52,8 +52,8 @@ software="acl apache2 apache2.2-common apache2-suexec-custom apache2-utils appar
   php$fpm_v php$fpm_v-apcu php$fpm_v-bz2 php$fpm_v-cgi php$fpm_v-cli php$fpm_v-common php$fpm_v-curl php$fpm_v-gd
   php$fpm_v-imagick php$fpm_v-imap php$fpm_v-intl php$fpm_v-ldap php$fpm_v-mbstring php$fpm_v-mysql php$fpm_v-opcache
   php$fpm_v-pgsql php$fpm_v-pspell php$fpm_v-readline php$fpm_v-xml php$fpm_v-zip postgresql postgresql-contrib
-  proftpd-basic quota rrdtool rsyslog util-linux spamassassin
-  sysstat unzip vim-common vsftpd whois zip zstd jailkit restic"
+  proftpd-core proftpd-mod-crypto quota rrdtool rsyslog util-linux spamassassin
+  sysstat unzip vim-common vsftpd whois zip zstd bubblewrap restic"
 
 installer_dependencies="apt-transport-https ca-certificates curl dirmngr gnupg openssl software-properties-common wget sudo"
 
@@ -983,8 +983,9 @@ if [ "$vsftpd" = 'no' ]; then
 	software=$(echo "$software" | sed -e "s/vsftpd//")
 fi
 if [ "$proftpd" = 'no' ]; then
-	software=$(echo "$software" | sed -e "s/proftpd-basic//")
+	software=$(echo "$software" | sed -e "s/proftpd-core//")
 	software=$(echo "$software" | sed -e "s/proftpd-mod-vroot//")
+	software=$(echo "$software" | sed -e "s/proftpd-mod-crypto//")
 fi
 if [ "$named" = 'no' ]; then
 	software=$(echo "$software" | sed -e "s/bind9//")
@@ -1059,9 +1060,7 @@ if [ -d "$withdebs" ]; then
 	software=$(echo "$software" | sed -e "s/hestia-web-terminal//")
 	software=$(echo "$software" | sed -e "s/hestia=${HESTIA_INSTALL_VER}//")
 fi
-if [ "$release" = '20.04' ]; then
-	software=$(echo "$software" | sed -e "s/libzip4/libzip5/")
-fi
+
 if [ "$release" = '24.04' ]; then
 	software=$(echo "$software" | sed -e "s/libzip4/libzip4t64/")
 fi
@@ -1167,6 +1166,11 @@ random_password=$(gen_pass '32')
 /usr/sbin/useradd "hestiaweb" -c "$email" --no-create-home
 # do not allow login into hestiaweb user
 echo hestiaweb:$random_password | sudo chpasswd -e
+
+# Add a general group for normal users created by Hestia
+if [ -z "$(grep ^hestia-users: /etc/group)" ]; then
+	groupadd --system "hestia-users"
+fi
 
 # Create user for php-fpm configs
 /usr/sbin/useradd "hestiamail" -c "$email" --no-create-home
@@ -1495,16 +1499,7 @@ $HESTIA/bin/v-change-sys-hostname $servername > /dev/null 2>&1
 # Configuring global OpenSSL options
 echo "[ * ] Configuring OpenSSL to improve TLS performance..."
 tls13_ciphers="TLS_AES_128_GCM_SHA256:TLS_CHACHA20_POLY1305_SHA256:TLS_AES_256_GCM_SHA384"
-if [ "$release" = "20.04" ]; then
-	if ! grep -qw "^openssl_conf = default_conf$" /etc/ssl/openssl.cnf 2> /dev/null; then
-		sed -i '/^oid_section		= new_oids$/a \\n# System default\nopenssl_conf = default_conf' /etc/ssl/openssl.cnf
-	fi
-	if ! grep -qw "^[default_conf]$" /etc/ssl/openssl.cnf 2> /dev/null; then
-		sed -i '$a [default_conf]\nssl_conf = ssl_sect\n\n[ssl_sect]\nsystem_default = hestia_openssl_sect\n\n[hestia_openssl_sect]\nCiphersuites = '"$tls13_ciphers"'\nOptions = PrioritizeChaCha' /etc/ssl/openssl.cnf
-	elif grep -qw "^system_default = system_default_sect$" /etc/ssl/openssl.cnf 2> /dev/null; then
-		sed -i '/^system_default = system_default_sect$/a system_default = hestia_openssl_sect\n\n[hestia_openssl_sect]\nCiphersuites = '"$tls13_ciphers"'\nOptions = PrioritizeChaCha' /etc/ssl/openssl.cnf
-	fi
-elif [ "$release" = "22.04" ]; then
+if [ "$release" = "22.04" ]; then
 	sed -i '/^system_default = system_default_sect$/a system_default = hestia_openssl_sect\n\n[hestia_openssl_sect]\nCiphersuites = '"$tls13_ciphers"'\nOptions = PrioritizeChaCha' /etc/ssl/openssl.cnf
 elif [ "$release" = "24.04" ]; then
 	if ! grep -qw "^ssl_conf = ssl_sect$" /etc/ssl/openssl.cnf 2> /dev/null; then
@@ -1524,13 +1519,8 @@ $HESTIA/bin/v-generate-ssl-cert $(hostname) '' 'US' 'California' \
 
 # Parsing certificate file
 crt_end=$(grep -n "END CERTIFICATE-" /tmp/hst.pem | cut -f 1 -d:)
-if [ "$release" != "20.04" ]; then
-	key_start=$(grep -n "BEGIN PRIVATE KEY" /tmp/hst.pem | cut -f 1 -d:)
-	key_end=$(grep -n "END PRIVATE KEY" /tmp/hst.pem | cut -f 1 -d:)
-else
-	key_start=$(grep -n "BEGIN RSA" /tmp/hst.pem | cut -f 1 -d:)
-	key_end=$(grep -n "END RSA" /tmp/hst.pem | cut -f 1 -d:)
-fi
+key_start=$(grep -n "BEGIN RSA" /tmp/hst.pem | cut -f 1 -d:)
+key_end=$(grep -n "END RSA" /tmp/hst.pem | cut -f 1 -d:)
 
 # Adding SSL certificate
 echo "[ * ] Adding SSL certificate to Hestia Control Panel..."
@@ -1756,20 +1746,13 @@ if [ "$proftpd" = 'yes' ]; then
 	cp -f $HESTIA_INSTALL_DIR/proftpd/proftpd.conf /etc/proftpd/
 	cp -f $HESTIA_INSTALL_DIR/proftpd/tls.conf /etc/proftpd/
 
-	# Disable TLS 1.3 support for ProFTPD versions older than v1.3.7a
-	if [ "$release" = '20.04' ]; then
-		sed -i 's/TLSProtocol                             TLSv1.2 TLSv1.3/TLSProtocol                             TLSv1.2/' /etc/proftpd/tls.conf
-	fi
-
 	update-rc.d proftpd defaults > /dev/null 2>&1
 	systemctl start proftpd >> $LOG
 	check_result $? "proftpd start failed"
 
-	if [ "$release" != '20.04' ]; then
-		unit_files="$(systemctl list-unit-files | grep proftpd)"
-		if [[ "$unit_files" =~ "disabled" ]]; then
-			systemctl enable proftpd
-		fi
+	unit_files="$(systemctl list-unit-files | grep proftpd)"
+	if [[ "$unit_files" =~ "disabled" ]]; then
+		systemctl enable proftpd
 	fi
 fi
 
@@ -1805,6 +1788,7 @@ if [ "$mysql" = 'yes' ] || [ "$mysql8" = 'yes' ]; then
 	fi
 
 	if [ "$mysql_type" = 'MariaDB' ]; then
+		sed -i 's|/usr/share/mysql|/usr/share/mariadb|g' /etc/mysql/my.cnf
 		update-rc.d mariadb defaults > /dev/null 2>&1
 		systemctl -q enable mariadb 2> /dev/null
 		systemctl start mariadb >> $LOG
@@ -1881,16 +1865,14 @@ if [ "$mysql" = 'yes' ] || [ "$mysql8" = 'yes' ]; then
 
 	# Create copy of config file
 	cp -f $HESTIA_INSTALL_DIR/phpmyadmin/config.inc.php /etc/phpmyadmin/
-	mkdir -p /var/lib/phpmyadmin/tmp
-	chmod 770 /var/lib/phpmyadmin/tmp
-	chown root:hestiamail /usr/share/phpmyadmin/tmp
 
 	# Set config and log directory
 	sed -i "s|'configFile' => ROOT_PATH . 'config.inc.php',|'configFile' => '/etc/phpmyadmin/config.inc.php',|g" /usr/share/phpmyadmin/libraries/vendor_config.php
 
 	# Create temporary folder and change permission
-	chmod 770 /usr/share/phpmyadmin/tmp
-	chown root:hestiamail /usr/share/phpmyadmin/tmp
+	mkdir -p /var/lib/phpmyadmin/tmp
+	chmod 770 /var/lib/phpmyadmin/tmp
+	chown -R hestiamail:www-data /usr/share/phpmyadmin/tmp/
 
 	# Generate blow fish
 	blowfish=$(head /dev/urandom | tr -dc A-Za-z0-9 | head -c 32)
@@ -1909,8 +1891,8 @@ if [ "$mysql" = 'yes' ] || [ "$mysql8" = 'yes' ]; then
 	source $HESTIA_INSTALL_DIR/phpmyadmin/pma.sh > /dev/null 2>&1
 
 	# Limit access to /etc/phpmyadmin/
-	chown -R root:www-data /etc/phpmyadmin/
-	chmod -R 640 /etc/phpmyadmin/*
+	chown -R root:hestiamail /etc/phpmyadmin/
+	chmod 640 /etc/phpmyadmin/config.inc.php
 	chmod 750 /etc/phpmyadmin/conf.d/
 fi
 
@@ -1943,6 +1925,10 @@ if [ "$postgresql" = 'yes' ]; then
 	rm phppgadmin-v$pga_v.tar.gz
 	write_config_value "DB_PGA_ALIAS" "phppgadmin"
 	$HESTIA/bin/v-change-sys-db-alias 'pga' "phppgadmin"
+
+	# Limit access to /etc/phppgadmin/
+	chown -R root:hestiamail /etc/phppgadmin/
+	chmod 640 /etc/phppgadmin/config.inc.php
 fi
 
 #----------------------------------------------------------#

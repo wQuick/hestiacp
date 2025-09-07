@@ -40,53 +40,6 @@ function setup() {
 }
 
 function validate_web_domain() {
-	local user=$1
-	local domain=$2
-	local webproof=$3
-	local webpath=${4}
-
-	refute [ -z "$user" ]
-	refute [ -z "$domain" ]
-	refute [ -z "$webproof" ]
-
-	source $HESTIA/func/ip.sh
-
-	run v-list-web-domain $user $domain
-	assert_success
-
-	USER_DATA=$HESTIA/data/users/$user
-	local domain_ip=$(get_object_value 'web' 'DOMAIN' "$domain" '$IP')
-	SSL=$(get_object_value 'web' 'DOMAIN' "$domain" '$SSL')
-	domain_ip=$(get_real_ip "$domain_ip")
-
-	if [ ! -z $webpath ]; then
-		domain_docroot=$(get_object_value 'web' 'DOMAIN' "$domain" '$CUSTOM_DOCROOT')
-		if [ -n "$domain_docroot" ] && [ -d "$domain_docroot" ]; then
-			assert_file_exist "${domain_docroot}/${webpath}"
-		else
-			assert_file_exist "${HOMEDIR}/${user}/web/${domain}/public_html/${webpath}"
-		fi
-	fi
-
-	# Test HTTP
-	# Curl hates UTF domains so convert them to ascci.
-	domain_idn=$(idn2 $domain)
-	run curl --location --silent --show-error --insecure --resolve "${domain_idn}:80:${domain_ip}" "http://${domain_idn}/${webpath}"
-	assert_success
-	assert_output --partial "$webproof"
-
-	# Test HTTPS
-	if [ "$SSL" = "yes" ]; then
-		run v-list-web-domain-ssl $user $domain
-		assert_success
-
-		run curl --location --silent --show-error --insecure --resolve "${domain_idn}:443:${domain_ip}" "https://${domain_idn}/${webpath}"
-		assert_success
-		assert_output --partial "$webproof"
-	fi
-}
-
-function validate_web_domain() {
     local user=$1
     local domain=$2
     local webproof=$3
@@ -458,7 +411,7 @@ function check_ip_not_banned(){
 }
 
 @test "User: Change user shell" {
-    run v-change-user-shell $user bash no
+    run v-change-user-shell $user bash
     assert_success
     refute_output
 
@@ -469,13 +422,13 @@ function check_ip_not_banned(){
 }
 
 @test "User: Change user invalid shell" {
-    run v-change-user-shell $user bashinvalid no
+    run v-change-user-shell $user bashinvalid
     assert_failure $E_INVALID
     assert_output --partial 'shell bashinvalid is not valid'
 }
 
 @test "User: Change user nologin" {
-    run v-change-user-shell $user nologin no
+    run v-change-user-shell $user nologin
     assert_success
     refute_output
 
@@ -485,15 +438,15 @@ function check_ip_not_banned(){
 		assert_file_exist /etc/systemd/system/$mount_file
 }
 
-@test "User: Change user bash with jail" {
-    run v-change-user-shell $user bash yes
+@test "User: Change user bash with bubblewrap jail" {
+    run v-change-user-shell $user jailbash
     assert_success
     refute_output
 
     run stat -c '%U' /home/$user
-    assert_output --partial 'root'
-		mount_file=$(systemd-escape -p --suffix=mount "/srv/jail/$user/home/$user")
-		assert_file_exist /etc/systemd/system/$mount_file
+    assert_output --partial "$user"
+		mount_file=$(systemd-escape -p --suffix=mount "/srv/jail/$user/home")
+		assert_file_not_exist /etc/systemd/system/$mount_file
 }
 
 @test "User: Change user default ns" {
@@ -512,7 +465,7 @@ function check_ip_not_banned(){
   refute_output
 }
 
-@test "User: Change user language (Does not exists)" {
+@test "User: Change user language (Does not exist)" {
   run v-change-user-language $user "aa"
   assert_failure $E_NOTEXIST
 }
@@ -529,7 +482,7 @@ function check_ip_not_banned(){
   refute_output
 }
 
-@test "User: Change user theme (Does not exists)" {
+@test "User: Change user theme (Does not exist)" {
   run v-change-user-theme $user "aa"
   assert_failure $E_NOTEXIST
 }
@@ -960,6 +913,12 @@ function check_ip_not_banned(){
 
 @test "WEB: Rebuild web domain" {
     run v-rebuild-web-domains $user
+    assert_success
+    refute_output
+}
+
+@test "WEB: Use quick install app on web domain" {
+    run v-quick-install-app install $user $domain Laravel
     assert_success
     refute_output
 }
